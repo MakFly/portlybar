@@ -12,6 +12,15 @@ MenuBarExtra + Settings + CLI
  config.json + logs + 127.0.0.1:7738
 ```
 
+## Screenshots
+
+<!-- Drop the PNGs in docs/screenshots/ under these exact names and the images below light up. -->
+
+|                                                                          |                                                                            |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| ![Menu bar popover](docs/screenshots/menubar.png)<br>Menu bar: detected ports and Docker containers, each stoppable in place | ![Docker](docs/screenshots/docker.png)<br>Docker: running and stopped containers, started or stopped from the app |
+| ![Ports](docs/screenshots/ports.png)<br>Ports: every TCP listener, labelled managed, external, or protected | ![Logs](docs/screenshots/logs.png)<br>Logs: live ANSI output from a real pseudo-terminal |
+
 ## Build
 
 Requirements: macOS 14+, Swift 6, and Xcode command-line tools.
