@@ -22,6 +22,28 @@ import Testing
     #expect(DockerPortInspector.publishedHostPorts("5432/tcp").isEmpty)
 }
 
+@Test func dockerContainerLineParserReadsState() {
+    let running = DockerPortInspector.parse(
+        "abc123\tinfra-postgres\tpostgres:16\trunning\tUp 2 hours (healthy)\t0.0.0.0:5432->5432/tcp\tinfra\tpostgres"
+    )
+    #expect(running?.state == .running)
+    #expect(running?.state.isRunning == true)
+    #expect(running?.publishedPorts == [5432])
+    #expect(running?.project == "infra")
+    #expect(running?.service == "postgres")
+
+    let stopped = DockerPortInspector.parse(
+        "def456\tinfra-mailpit\taxllent/mailpit\texited\tExited (0) 3 days ago\t\t\t"
+    )
+    #expect(stopped?.state == .exited)
+    #expect(stopped?.state.isRunning == false)
+    #expect(stopped?.publishedPorts.isEmpty == true)
+    #expect(stopped?.project == nil)
+    #expect(stopped?.service == nil)
+
+    #expect(DockerPortInspector.parse("truncated\tline") == nil)
+}
+
 @Test func portInspectorFiltersSystemInfrastructure() {
     #expect(!PortInspector.shouldInclude(command: "OrbStack Helper"))
     #expect(!PortInspector.shouldInclude(command: "ControlCenter"))

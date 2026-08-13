@@ -147,6 +147,7 @@ private struct PortRow: View {
 
 struct DockerSettingsView: View {
     @EnvironmentObject private var supervisor: Supervisor
+    @State private var errorMessage: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -157,7 +158,7 @@ struct DockerSettingsView: View {
                 }
                 Spacer()
                 Label {
-                    Text(verbatim: String(supervisor.dockerContainers.count))
+                    Text(verbatim: "\(supervisor.runningDockerContainers.count)/\(supervisor.dockerContainers.count)")
                         .monospacedDigit()
                 } icon: {
                     Circle().fill(Color.green).frame(width: 7, height: 7)
@@ -180,7 +181,9 @@ struct DockerSettingsView: View {
                 ScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(supervisor.dockerContainers) { container in
-                            DockerContainerCard(container: container)
+                            DockerContainerCard(container: container) { running in
+                                toggle(container, running: running)
+                            }
                         }
                     }
                     .padding(16)
@@ -188,30 +191,56 @@ struct DockerSettingsView: View {
             }
         }
         .task { await supervisor.refreshListeningPorts() }
+        .errorAlert(message: $errorMessage)
+    }
+
+    private func toggle(_ container: DockerContainerStatus, running: Bool) {
+        Task {
+            do {
+                if running {
+                    try await supervisor.startDockerContainer(id: container.id, name: container.name)
+                } else {
+                    try await supervisor.stopDockerContainer(id: container.id, name: container.name)
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 }
 
 private struct DockerContainerCard: View {
     let container: DockerContainerStatus
+    let onToggle: (Bool) -> Void
     @State private var hovering = false
 
+    private var isRunning: Bool { container.state.isRunning }
     private var isHealthy: Bool { container.status.localizedCaseInsensitiveContains("healthy") }
+
+    private var stateColor: SwiftUI.Color {
+        switch container.state {
+        case .running: return isHealthy ? .green : .cyan
+        case .paused, .restarting: return .blue
+        case .dead: return .red
+        case .created, .exited, .unknown: return .secondary
+        }
+    }
 
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.blue.opacity(0.12))
+                    .fill(Color.blue.opacity(isRunning ? 0.12 : 0.05))
                 Image(systemName: "shippingbox.fill")
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(isRunning ? Color.blue : Color.secondary)
             }
             .frame(width: 42, height: 42)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 7) {
-                    Text(container.name).font(.headline)
-                    Circle().fill(isHealthy ? Color.green : Color.cyan).frame(width: 6, height: 6)
+                    Text(container.name).font(.headline).opacity(isRunning ? 1 : 0.6)
+                    Circle().fill(stateColor).frame(width: 6, height: 6)
                     Text(container.status)
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -229,7 +258,14 @@ private struct DockerContainerCard: View {
 
             Spacer()
 
-            if container.publishedPorts.isEmpty {
+            if !isRunning {
+                Text("docker.state.stopped")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.secondary.opacity(0.08), in: Capsule())
+            } else if container.publishedPorts.isEmpty {
                 Text("docker.internal")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
@@ -252,6 +288,12 @@ private struct DockerContainerCard: View {
                     }
                 }
             }
+
+            Button { onToggle(!isRunning) } label: {
+                Image(systemName: isRunning ? "stop.fill" : "play.fill")
+            }
+            .buttonStyle(.borderless)
+            .help(isRunning ? "docker.stop" : "docker.start")
         }
         .padding(14)
         .background(hovering ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 13))

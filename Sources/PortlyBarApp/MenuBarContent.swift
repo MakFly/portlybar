@@ -8,6 +8,9 @@ struct MenuBarContent: View {
     @EnvironmentObject private var supervisor: Supervisor
     @AppStorage("app.language") private var appLanguage = "en"
     @State private var showStopAllConfirmation = false
+    @State private var portPendingStop: ListeningPort?
+    @State private var showStoppedContainers = false
+    @State private var errorMessage: String?
 
     private let maximumVisiblePorts = 6
     private let maximumVisibleContainers = 5
@@ -15,7 +18,13 @@ struct MenuBarContent: View {
     private var contentHeight: CGFloat {
         let projectRows = supervisor.projects.count + supervisor.projects.reduce(0) { $0 + $1.servers.count }
         let portRows = min(supervisor.listeningPorts.count, maximumVisiblePorts)
-        let dockerRows = min(supervisor.dockerContainers.count, maximumVisibleContainers)
+        var dockerRows = min(supervisor.runningDockerContainers.count, maximumVisibleContainers)
+        if !supervisor.stoppedDockerContainers.isEmpty {
+            dockerRows += 1
+            if showStoppedContainers {
+                dockerRows += min(supervisor.stoppedDockerContainers.count, maximumVisibleContainers)
+            }
+        }
         let sections = [projectRows, portRows, dockerRows].filter { $0 > 0 }.count
         return min(500, max(210, CGFloat(projectRows + portRows + dockerRows) * 42 + CGFloat(sections) * 34 + 20))
     }
@@ -53,6 +62,46 @@ struct MenuBarContent: View {
         .confirmationDialog("stop.all.confirm", isPresented: $showStopAllConfirmation) {
             Button("stop.all", role: .destructive) { supervisor.stopAll() }
             Button("common.cancel", role: .cancel) {}
+        }
+        .confirmationDialog("port.stop.confirm", isPresented: stopPortDialogPresented) {
+            Button("port.stop", role: .destructive) {
+                if let port = portPendingStop { stopExternal(port) }
+            }
+            Button("common.cancel", role: .cancel) { portPendingStop = nil }
+        } message: {
+            if let port = portPendingStop {
+                Text(verbatim: "\(port.command) · PID \(port.pid) · :\(port.port)")
+            }
+        }
+        .errorAlert(message: $errorMessage)
+    }
+
+    private var stopPortDialogPresented: Binding<Bool> {
+        Binding(get: { portPendingStop != nil }, set: { if !$0 { portPendingStop = nil } })
+    }
+
+    private func stopExternal(_ port: ListeningPort) {
+        do {
+            try supervisor.stopExternalPort(
+                PortRequest(port: port.port, expectedPID: port.pid, force: false, confirmed: true)
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        portPendingStop = nil
+    }
+
+    private func setDockerContainer(_ container: DockerContainerStatus, running: Bool) {
+        Task {
+            do {
+                if running {
+                    try await supervisor.startDockerContainer(id: container.id, name: container.name)
+                } else {
+                    try await supervisor.stopDockerContainer(id: container.id, name: container.name)
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -147,7 +196,13 @@ struct MenuBarContent: View {
             }
 
             ForEach(supervisor.listeningPorts.prefix(maximumVisiblePorts)) { port in
-                DiscoveredPortRow(port: port)
+                DiscoveredPortRow(port: port) {
+                    if let id = port.managedServerID {
+                        supervisor.runtime(id: id)?.stop()
+                    } else {
+                        portPendingStop = port
+                    }
+                }
             }
         }
     }
@@ -157,7 +212,7 @@ struct MenuBarContent: View {
             sectionHeader(
                 title: "Docker",
                 symbol: "shippingbox.fill",
-                count: supervisor.dockerContainers.count,
+                count: supervisor.runningDockerContainers.count,
                 color: .blue
             ) {
                 Button("docker.view.all") { model.openSettings(tab: .docker) }
@@ -166,8 +221,27 @@ struct MenuBarContent: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(supervisor.dockerContainers.prefix(maximumVisibleContainers)) { container in
-                DockerContainerMenuRow(container: container)
+            ForEach(supervisor.runningDockerContainers.prefix(maximumVisibleContainers)) { container in
+                DockerContainerMenuRow(container: container) {
+                    setDockerContainer(container, running: false)
+                }
+            }
+
+            if !supervisor.stoppedDockerContainers.isEmpty { stoppedContainersGroup }
+        }
+    }
+
+    @ViewBuilder private var stoppedContainersGroup: some View {
+        DisclosureToggle(
+            isExpanded: $showStoppedContainers,
+            count: supervisor.stoppedDockerContainers.count
+        )
+
+        if showStoppedContainers {
+            ForEach(supervisor.stoppedDockerContainers.prefix(maximumVisibleContainers)) { container in
+                DockerContainerMenuRow(container: container) {
+                    setDockerContainer(container, running: true)
+                }
             }
         }
     }
@@ -287,50 +361,77 @@ private struct MenuSurface<Content: View>: View {
 
 private struct DiscoveredPortRow: View {
     let port: ListeningPort
-    @State private var hovering = false
-
-    var body: some View {
-        Button {
-            NSWorkspace.shared.open(URL(string: "http://localhost:\(port.port)")!)
-        } label: {
-            HStack(spacing: 10) {
-                Circle().fill(Color.green).frame(width: 7, height: 7)
-                Text(verbatim: ":\(port.port)")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.cyan)
-                    .frame(width: 60, alignment: .leading)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(port.command).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                    if let directory = port.workingDirectory {
-                        Text(directory)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                Image(systemName: "arrow.up.forward.square")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(hovering ? Color.accentColor : Color.secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .contentShape(Rectangle())
-            .background(hovering ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 3)
-        .onHover { hovering = $0 }
-    }
-}
-
-private struct DockerContainerMenuRow: View {
-    let container: DockerContainerStatus
+    let onStop: () -> Void
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 10) {
             Circle().fill(Color.green).frame(width: 7, height: 7)
+            Text(verbatim: ":\(port.port)")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundStyle(.cyan)
+                .frame(width: 60, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(port.command).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                if let directory = port.workingDirectory {
+                    Text(directory)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Image(systemName: "arrow.up.forward.square")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(hovering ? Color.accentColor : Color.secondary)
+            stopControl
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
+        .background(hovering ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+        .padding(.horizontal, 3)
+        .onHover { hovering = $0 }
+        .onTapGesture {
+            NSWorkspace.shared.open(URL(string: "http://localhost:\(port.port)")!)
+        }
+    }
+
+    @ViewBuilder private var stopControl: some View {
+        switch port.ownership {
+        case .managed:
+            CompactIconButton(symbol: "stop.fill", help: "server.stop", action: onStop)
+        case .external:
+            CompactIconButton(symbol: "stop.fill", help: "port.stop", tint: .red, action: onStop)
+        case .protected:
+            Image(systemName: "lock.fill")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 22, height: 22)
+                .help("ownership.protected")
+        }
+    }
+}
+
+private struct DockerContainerMenuRow: View {
+    let container: DockerContainerStatus
+    let onToggle: () -> Void
+    @State private var hovering = false
+
+    private var isRunning: Bool { container.state.isRunning }
+
+    private var stateColor: Color {
+        switch container.state {
+        case .running: return .green
+        case .paused, .restarting: return .blue
+        case .dead: return .red
+        case .created, .exited, .unknown: return .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle().fill(stateColor).frame(width: 7, height: 7)
             VStack(alignment: .leading, spacing: 2) {
                 Text(container.name)
                     .font(.system(size: 12, weight: .semibold))
@@ -340,21 +441,60 @@ private struct DockerContainerMenuRow: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
+            .opacity(isRunning ? 1 : 0.55)
             Spacer()
-            if container.publishedPorts.isEmpty {
-                Text("docker.internal")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.tertiary)
-            } else {
+            if isRunning, !container.publishedPorts.isEmpty {
                 Text(verbatim: container.publishedPorts.map { ":\($0)" }.joined(separator: "  "))
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.blue)
+            } else {
+                Text(isRunning ? "docker.internal" : "docker.state.stopped")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
             }
+            CompactIconButton(
+                symbol: isRunning ? "stop.fill" : "play.fill",
+                help: isRunning ? "docker.stop" : "docker.start",
+                action: onToggle
+            )
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .contentShape(Rectangle())
         .background(hovering ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+        .padding(.horizontal, 3)
+        .onHover { hovering = $0 }
+    }
+}
+
+private struct DisclosureToggle: View {
+    @Binding var isExpanded: Bool
+    let count: Int
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .frame(width: 7)
+                Text("docker.stopped.section")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(verbatim: String(count))
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .background(hovering ? Color.primary.opacity(0.06) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
         .padding(.horizontal, 3)
         .onHover { hovering = $0 }
     }
@@ -386,6 +526,7 @@ private struct MenuFooterButton: View {
 private struct CompactIconButton: View {
     let symbol: String
     let help: LocalizedStringKey
+    var tint: Color?
     let action: () -> Void
     @State private var hovering = false
 
@@ -393,6 +534,7 @@ private struct CompactIconButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(tint ?? Color.primary)
                 .frame(width: 22, height: 22)
                 .background(hovering ? Color.primary.opacity(0.10) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
         }

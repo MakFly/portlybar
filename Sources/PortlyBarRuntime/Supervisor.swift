@@ -121,6 +121,23 @@ public final class Supervisor: ObservableObject {
         try PortInspector.stop(port: request.port, expectedPID: expectedPID, force: request.force == true)
     }
 
+    public var runningDockerContainers: [DockerContainerStatus] { dockerContainers.filter { $0.state.isRunning } }
+    public var stoppedDockerContainers: [DockerContainerStatus] { dockerContainers.filter { !$0.state.isRunning } }
+
+    public func startDockerContainer(id: String, name: String? = nil) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            try DockerPortInspector.start(id: id, label: name)
+        }.value
+        await refreshListeningPorts()
+    }
+
+    public func stopDockerContainer(id: String, name: String? = nil) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            try DockerPortInspector.stop(id: id, label: name)
+        }.value
+        await refreshListeningPorts()
+    }
+
     public func takeOver(server selector: String) async throws {
         let runtime = try runtime(selector: selector)
         guard let port = runtime.configuration.port else {
@@ -452,7 +469,7 @@ public final class Supervisor: ObservableObject {
         let controlPort = configuration.apiPort
         let detected = await Task.detached(priority: .utility) {
             let ports = PortInspector.listeners(managed: managed).filter { $0.port != controlPort }
-            return (ports, DockerPortInspector.runningContainers())
+            return (ports, DockerPortInspector.containers())
         }.value
         listeningPorts = detected.0
         dockerContainers = detected.1

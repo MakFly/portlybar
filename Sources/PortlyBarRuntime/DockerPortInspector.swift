@@ -6,10 +6,27 @@ public struct DockerPublishedContainer: Hashable, Sendable {
     public let hostPort: Int
 }
 
+public enum DockerContainerState: String, Codable, Sendable {
+    case running
+    case paused
+    case restarting
+    case created
+    case exited
+    case dead
+    case unknown
+
+    init(rawDockerState: String) {
+        self = DockerContainerState(rawValue: rawDockerState.lowercased()) ?? .unknown
+    }
+
+    public var isRunning: Bool { self == .running || self == .restarting }
+}
+
 public struct DockerContainerStatus: Codable, Identifiable, Hashable, Sendable {
     public let id: String
     public let name: String
     public let image: String
+    public let state: DockerContainerState
     public let status: String
     public let publishedPorts: [Int]
     public let project: String?
@@ -19,6 +36,7 @@ public struct DockerContainerStatus: Codable, Identifiable, Hashable, Sendable {
         id: String,
         name: String,
         image: String,
+        state: DockerContainerState,
         status: String,
         publishedPorts: [Int],
         project: String?,
@@ -27,6 +45,7 @@ public struct DockerContainerStatus: Codable, Identifiable, Hashable, Sendable {
         self.id = id
         self.name = name
         self.image = image
+        self.state = state
         self.status = status
         self.publishedPorts = publishedPorts
         self.project = project
@@ -35,27 +54,32 @@ public struct DockerContainerStatus: Codable, Identifiable, Hashable, Sendable {
 }
 
 public enum DockerPortInspector {
-    public static func runningContainers() -> [DockerContainerStatus] {
+    /// Every container known to Docker, running or not, running ones first.
+    public static func containers() -> [DockerContainerStatus] {
         guard let docker = dockerExecutable() else { return [] }
-        let format = "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Label \"com.docker.compose.project\"}}\t{{.Label \"com.docker.compose.service\"}}"
-        let result = run(docker, ["ps", "--format", format])
+        let format = "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Label \"com.docker.compose.project\"}}\t{{.Label \"com.docker.compose.service\"}}"
+        let result = run(docker, ["ps", "--all", "--format", format])
         guard result.status == 0 else { return [] }
 
-        return result.output.split(separator: "\n").compactMap { rawLine in
-            let fields = String(rawLine).components(separatedBy: "\t")
-            guard fields.count >= 7 else { return nil }
-            return DockerContainerStatus(
-                id: fields[0],
-                name: fields[1],
-                image: fields[2],
-                status: fields[3],
-                publishedPorts: publishedHostPorts(fields[4]),
-                project: fields[5].isEmpty ? nil : fields[5],
-                service: fields[6].isEmpty ? nil : fields[6]
-            )
-        }.sorted {
-            ($0.project ?? $0.name, $0.name) < ($1.project ?? $1.name, $1.name)
+        return result.output.split(separator: "\n").compactMap { parse(String($0)) }.sorted {
+            if $0.state.isRunning != $1.state.isRunning { return $0.state.isRunning }
+            return ($0.project ?? $0.name, $0.name) < ($1.project ?? $1.name, $1.name)
         }
+    }
+
+    static func parse(_ line: String) -> DockerContainerStatus? {
+        let fields = line.components(separatedBy: "\t")
+        guard fields.count >= 8 else { return nil }
+        return DockerContainerStatus(
+            id: fields[0],
+            name: fields[1],
+            image: fields[2],
+            state: DockerContainerState(rawDockerState: fields[3]),
+            status: fields[4],
+            publishedPorts: publishedHostPorts(fields[5]),
+            project: fields[6].isEmpty ? nil : fields[6],
+            service: fields[7].isEmpty ? nil : fields[7]
+        )
     }
 
     public static func container(publishing port: Int) -> DockerPublishedContainer? {
@@ -73,15 +97,27 @@ public enum DockerPortInspector {
     }
 
     public static func stop(_ container: DockerPublishedContainer) throws {
+        try stop(id: container.id, label: container.name)
+    }
+
+    public static func stop(id: String, label: String? = nil) throws {
+        try perform(["stop", "--time", "5", id], verb: "stop", label: label ?? id)
+    }
+
+    public static func start(id: String, label: String? = nil) throws {
+        try perform(["start", id], verb: "start", label: label ?? id)
+    }
+
+    private static func perform(_ arguments: [String], verb: String, label: String) throws {
         guard let docker = dockerExecutable() else {
             throw NSError(domain: "PortlyBarDocker", code: 1, userInfo: [NSLocalizedDescriptionKey: "Docker CLI is unavailable."])
         }
-        let result = run(docker, ["stop", "--time", "5", container.id])
+        let result = run(docker, arguments)
         guard result.status == 0 else {
             throw NSError(
                 domain: "PortlyBarDocker",
                 code: Int(result.status),
-                userInfo: [NSLocalizedDescriptionKey: "Unable to stop Docker container \(container.name): \(result.output.trimmingCharacters(in: .whitespacesAndNewlines))"]
+                userInfo: [NSLocalizedDescriptionKey: "Unable to \(verb) Docker container \(label): \(result.output.trimmingCharacters(in: .whitespacesAndNewlines))"]
             )
         }
     }
