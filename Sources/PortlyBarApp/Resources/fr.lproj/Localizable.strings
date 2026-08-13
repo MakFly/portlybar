@@ -26,6 +26,8 @@
 "dashboard.pid" = "Processus PID %d";
 "dashboard.port.count" = "%d ports";
 "menu.subtitle" = "Superviseur local";
+"menu.show.all" = "Tout afficher";
+"menu.show.less" = "Réduire";
 "project.add" = "Ajouter un projet";
 "project.delete" = "Supprimer le projet";
 "project.delete.confirm" = "Supprimer ce projet ?";

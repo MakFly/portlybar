@@ -10,23 +10,38 @@ struct MenuBarContent: View {
     @State private var showStopAllConfirmation = false
     @State private var portPendingStop: ListeningPort?
     @State private var showStoppedContainers = false
+    @State private var showAllPorts = false
+    @State private var showAllContainers = false
     @State private var errorMessage: String?
 
     private let maximumVisiblePorts = 6
     private let maximumVisibleContainers = 5
 
+    private var visiblePorts: [ListeningPort] {
+        showAllPorts ? supervisor.listeningPorts : Array(supervisor.listeningPorts.prefix(maximumVisiblePorts))
+    }
+    private var visibleRunningContainers: [DockerContainerStatus] {
+        let all = supervisor.runningDockerContainers
+        return showAllContainers ? all : Array(all.prefix(maximumVisibleContainers))
+    }
+    private var visibleStoppedContainers: [DockerContainerStatus] {
+        let all = supervisor.stoppedDockerContainers
+        return showAllContainers ? all : Array(all.prefix(maximumVisibleContainers))
+    }
+
+    private var isExpanded: Bool { showAllPorts || showAllContainers || showStoppedContainers }
+
     private var contentHeight: CGFloat {
         let projectRows = supervisor.projects.count + supervisor.projects.reduce(0) { $0 + $1.servers.count }
-        let portRows = min(supervisor.listeningPorts.count, maximumVisiblePorts)
-        var dockerRows = min(supervisor.runningDockerContainers.count, maximumVisibleContainers)
+        let portRows = visiblePorts.count
+        var dockerRows = visibleRunningContainers.count
         if !supervisor.stoppedDockerContainers.isEmpty {
             dockerRows += 1
-            if showStoppedContainers {
-                dockerRows += min(supervisor.stoppedDockerContainers.count, maximumVisibleContainers)
-            }
+            if showStoppedContainers { dockerRows += visibleStoppedContainers.count }
         }
         let sections = [projectRows, portRows, dockerRows].filter { $0 > 0 }.count
-        return min(500, max(210, CGFloat(projectRows + portRows + dockerRows) * 42 + CGFloat(sections) * 34 + 20))
+        let rows = CGFloat(projectRows + portRows + dockerRows) * 42 + CGFloat(sections) * 34 + 20
+        return min(isExpanded ? 620 : 500, max(210, rows))
     }
 
     var body: some View {
@@ -189,13 +204,13 @@ struct MenuBarContent: View {
                 count: supervisor.listeningPorts.count,
                 color: .cyan
             ) {
-                Button("dashboard.view.all") { model.openSettings(tab: .ports) }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
+                SectionExpander(
+                    isExpanded: $showAllPorts,
+                    hiddenCount: supervisor.listeningPorts.count - visiblePorts.count
+                )
             }
 
-            ForEach(supervisor.listeningPorts.prefix(maximumVisiblePorts)) { port in
+            ForEach(visiblePorts) { port in
                 DiscoveredPortRow(port: port) {
                     if let id = port.managedServerID {
                         supervisor.runtime(id: id)?.stop()
@@ -215,13 +230,13 @@ struct MenuBarContent: View {
                 count: supervisor.runningDockerContainers.count,
                 color: .blue
             ) {
-                Button("docker.view.all") { model.openSettings(tab: .docker) }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
+                SectionExpander(
+                    isExpanded: $showAllContainers,
+                    hiddenCount: hiddenContainerCount
+                )
             }
 
-            ForEach(supervisor.runningDockerContainers.prefix(maximumVisibleContainers)) { container in
+            ForEach(visibleRunningContainers) { container in
                 DockerContainerMenuRow(container: container) {
                     setDockerContainer(container, running: false)
                 }
@@ -231,6 +246,14 @@ struct MenuBarContent: View {
         }
     }
 
+    /// Rows the Docker section is currently hiding. Stopped rows only count once
+    /// their group is open, since the group header already advertises its total.
+    private var hiddenContainerCount: Int {
+        let running = supervisor.runningDockerContainers.count - visibleRunningContainers.count
+        guard showStoppedContainers else { return running }
+        return running + supervisor.stoppedDockerContainers.count - visibleStoppedContainers.count
+    }
+
     @ViewBuilder private var stoppedContainersGroup: some View {
         DisclosureToggle(
             isExpanded: $showStoppedContainers,
@@ -238,7 +261,7 @@ struct MenuBarContent: View {
         )
 
         if showStoppedContainers {
-            ForEach(supervisor.stoppedDockerContainers.prefix(maximumVisibleContainers)) { container in
+            ForEach(visibleStoppedContainers) { container in
                 DockerContainerMenuRow(container: container) {
                     setDockerContainer(container, running: true)
                 }
@@ -464,6 +487,43 @@ private struct DockerContainerMenuRow: View {
         .background(hovering ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
         .padding(.horizontal, 3)
         .onHover { hovering = $0 }
+    }
+}
+
+/// Section header accessory that reveals the rows a section is truncating,
+/// inside the popover. Stays out of the way when nothing is hidden.
+private struct SectionExpander: View {
+    @Binding var isExpanded: Bool
+    let hiddenCount: Int
+    @State private var hovering = false
+
+    var body: some View {
+        if isExpanded || hiddenCount > 0 {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    if isExpanded {
+                        Text("menu.show.less")
+                    } else {
+                        Text("menu.show.all")
+                        Text(verbatim: "+\(hiddenCount)")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(hovering ? Color.accentColor : Color.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
+                .background(hovering ? Color.primary.opacity(0.07) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+        }
     }
 }
 
