@@ -1,0 +1,4 @@
+interface:
+  display_name: "PortlyBar"
+  short_description: "Manage local servers through PortlyBar"
+  default_prompt: "Use $portlybar to inspect and manage the local development servers safely."

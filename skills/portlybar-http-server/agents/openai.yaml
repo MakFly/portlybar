@@ -1,0 +1,4 @@
+interface:
+  display_name: "PortlyBar HTTP Server"
+  short_description: "Launch a supervised HTTP server on a free port"
+  default_prompt: "Use $portlybar-http-server to launch this local HTTP server safely on a free port."
