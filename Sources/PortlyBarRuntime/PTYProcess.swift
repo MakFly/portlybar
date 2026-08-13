@@ -53,7 +53,11 @@ public final class PTYProcess: NSObject, LocalProcessDelegate, @unchecked Sendab
     }
 
     public func terminate(force: Bool = false) {
-        guard let pid else { return }
+        // Only signal while the pseudo-terminal is still held open. The exit
+        // callback reaches us on the delegate queue, so a caller escalating on
+        // its own timer can otherwise signal a PID the kernel already recycled,
+        // and kill(-pid) would take out an unrelated process group.
+        guard isRunning, let pid else { return }
         let signal = force ? SIGKILL : SIGTERM
         // SwiftTerm creates a session for the child. Signal its whole process group
         // so file watchers and shell descendants do not remain orphaned.

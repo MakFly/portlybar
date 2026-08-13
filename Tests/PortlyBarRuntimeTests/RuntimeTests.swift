@@ -186,6 +186,20 @@ import Testing
     #expect(process.pid == nil)
 }
 
+@Test @MainActor func terminateIsInertOnceTheProcessIsGone() async throws {
+    let delegate = PTYDelegate()
+    let process = PTYProcess(delegate: delegate)
+    try process.start(command: "exit 0", directory: "/tmp", environment: [:])
+    let result = try await delegate.result.value(timeout: 5)
+    #expect(result.exitCode == 0)
+
+    // The PID may already belong to someone else, so nothing may be signalled.
+    #expect(!process.isRunning)
+    process.terminate()
+    process.terminate(force: true)
+    #expect(process.pid == nil)
+}
+
 @Test @MainActor func temporaryJobReturnsItsRealExitCode() async throws {
     let directory = temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
