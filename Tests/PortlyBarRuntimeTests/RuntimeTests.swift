@@ -168,6 +168,25 @@ import Testing
     let result = try await delegate.result.value(timeout: 5)
     #expect(result.exitCode == 0)
     let output = await delegate.waitForOutput(containing: "\u{1B}[32mhello\u{1B}[0m")
+
+    // TEMPORARY CI DIAGNOSTIC — remove once the runner behaviour is understood.
+    let environment = ProcessInfo.processInfo.environment
+    let pipe = Pipe()
+    let plain = Process()
+    plain.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    plain.arguments = ["-lc", "printf 'hello\\n'"]
+    plain.standardOutput = pipe
+    plain.standardError = pipe
+    try? plain.run()
+    let pipeData = pipe.fileHandleForReading.readDataToEndOfFile()
+    plain.waitUntilExit()
+    Issue.record("""
+    DIAG pty-bytes=\(Array(output.utf8).count) exit=\(String(describing: result.exitCode))
+    DIAG pipe-status=\(plain.terminationStatus) pipe-output=\(String(decoding: pipeData, as: UTF8.self).debugDescription)
+    DIAG TERM=\(environment["TERM"] ?? "unset") SHELL=\(environment["SHELL"] ?? "unset") HOME=\(environment["HOME"] ?? "unset") CI=\(environment["CI"] ?? "unset")
+    DIAG zsh-exists=\(FileManager.default.isExecutableFile(atPath: "/bin/zsh")) cores=\(ProcessInfo.processInfo.activeProcessorCount)
+    """)
+
     #expect(output.contains("\u{1B}[32mhello\u{1B}[0m"))
 }
 
