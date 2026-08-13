@@ -166,8 +166,9 @@ import Testing
         environment: ProcessInfo.processInfo.environment
     )
     let result = try await delegate.result.value(timeout: 5)
-    #expect(result.output.contains("\u{1B}[32mhello\u{1B}[0m"))
     #expect(result.exitCode == 0)
+    let output = await delegate.waitForOutput(containing: "\u{1B}[32mhello\u{1B}[0m")
+    #expect(output.contains("\u{1B}[32mhello\u{1B}[0m"))
 }
 
 @Test @MainActor func ptyProcessReportsTerminationAfterStoppingProcessGroup() async throws {
@@ -241,6 +242,22 @@ private final class PTYDelegate: PTYProcessDelegate, @unchecked Sendable {
     let result = AsyncValue<Result>()
     private let lock = NSLock()
     private var bytes: [UInt8] = []
+    var output: String {
+        lock.lock(); defer { lock.unlock() }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// SwiftTerm does not guarantee the final read lands before the exit
+    /// callback, so tests wait for output rather than snapshotting it on exit.
+    func waitForOutput(containing needle: String, timeout: TimeInterval = 5) async -> String {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if output.contains(needle) { break }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return output
+    }
+
     func ptyProcess(_ process: PTYProcess, received bytes: ArraySlice<UInt8>) {
         lock.lock(); self.bytes.append(contentsOf: bytes); lock.unlock()
     }
