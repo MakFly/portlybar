@@ -14,12 +14,19 @@ MenuBarExtra + Settings + CLI
 
 ## Screenshots
 
-<!-- Drop the PNGs in docs/screenshots/ under these exact names and the images below light up. -->
+<p align="center">
+  <img src="docs/screenshots/menubar.png" alt="PortlyBar menu bar popover" width="360">
+</p>
 
-|                                                                          |                                                                            |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| ![Menu bar popover](docs/screenshots/menubar.png)<br>Menu bar: detected ports and Docker containers, each stoppable in place | ![Docker](docs/screenshots/docker.png)<br>Docker: running and stopped containers, started or stopped from the app |
-| ![Ports](docs/screenshots/ports.png)<br>Ports: every TCP listener, labelled managed, external, or protected | ![Logs](docs/screenshots/logs.png)<br>Logs: live ANSI output from a real pseudo-terminal |
+<p align="center">
+  <em>Detected ports and Docker containers, each stoppable without leaving the menu bar.<br>
+  Sections say how many rows they hide (<code>Show all +3</code>) and expand in place.</em>
+</p>
+
+|                                                                                                                    |                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| <img src="docs/screenshots/projects.png" alt="Control plane"><br>**Control plane** — active ports, external processes, and containers at a glance | <img src="docs/screenshots/docker.png" alt="Docker"><br>**Docker** — running and stopped containers, started or stopped from the app |
+| <img src="docs/screenshots/ports.png" alt="Ports"><br>**Ports** — every TCP listener, labelled managed, external, or protected | <img src="docs/screenshots/general.png" alt="General settings"><br>**General** — language, login item, health and log retention |
 
 ## Build
 

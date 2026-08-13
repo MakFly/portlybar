@@ -1,6 +1,7 @@
 # Screenshots
 
-The README expects four PNGs in this folder: `menubar.png`, `docker.png`, `ports.png`, `logs.png`.
+The README expects five PNGs in this folder: `menubar.png`, `projects.png`, `docker.png`,
+`ports.png`, `general.png`. Replace one in place to refresh it; the README needs no edit.
 
 `screencapture` needs Screen Recording permission: System Settings → Privacy & Security →
 Screen Recording → enable your terminal, then restart it.
@@ -27,9 +28,10 @@ Open the tab you want, then pick the window interactively. `-o` drops the drop s
 otherwise pads the image with a wide transparent border.
 
 ```sh
-screencapture -o -w docs/screenshots/docker.png   # press space, then click the window
+screencapture -o -w docs/screenshots/projects.png   # press space, then click the window
+screencapture -o -w docs/screenshots/docker.png
 screencapture -o -w docs/screenshots/ports.png
-screencapture -o -w docs/screenshots/logs.png
+screencapture -o -w docs/screenshots/general.png
 ```
 
 ## Before committing
