@@ -203,7 +203,16 @@ import Testing
     let finished = try supervisor.temporaryStatus(id: status.id)
     #expect(finished.state == .failed)
     #expect(finished.exitCode == 7)
-    #expect(try supervisor.logs(server: status.id, tail: 10).contains("done"))
+
+    // The PTY drains on its own queue, so the exit can be observed before the
+    // last line reaches the log store.
+    var logs: [String] = []
+    for _ in 0..<50 {
+        logs = try supervisor.logs(server: status.id, tail: 10)
+        if logs.contains("done") { break }
+        try await Task.sleep(for: .milliseconds(100))
+    }
+    #expect(logs.contains("done"))
 }
 
 @Test @MainActor func controlAPIRejectsBrowserOrigins() async throws {
